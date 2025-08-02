@@ -40,8 +40,6 @@ class BluetoothController extends GetxController {
   }
 
   void _cleanup() {
-    _reconnectionTimer?.cancel();
-    _heartbeatTimer?.cancel();
     _connectionSubscription?.cancel();
     _adapterStateSubscription?.cancel();
   }
@@ -93,6 +91,8 @@ class BluetoothController extends GetxController {
       }
       await FlutterBluePlus.stopScan();
       isScanning = true;
+
+      // Finding only the specific device. Wont be able to see other bluetooth devices
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 15),
         withServices: [Guid('0000ffe0-0000-1000-8000-00805f9b34fb')],
@@ -123,7 +123,7 @@ class BluetoothController extends GetxController {
       debugPrint('Error stopping scan: $e');
     }
   }
-
+// Funtion for sending data to the specific bluetooth device
   Future<void> sendHexData({
     List<int> data = const [0x54, 0x50, 0x02, 0x00, 0x00, 0xA6],
     String? guid = '0000FEE1-0000-1000-8000-00805F9B34FB',
@@ -163,7 +163,7 @@ class BluetoothController extends GetxController {
       );
     }
   }
-
+  // Function for reading data from the specific device
   Future<void> readFromCharacteristic() async {
     try {
       if (connectedDevice == null) return;
@@ -205,16 +205,11 @@ class BluetoothController extends GetxController {
 
   void _handleConnectionLoss(String reason) {
     debugPrint('Connection lost: $reason');
-
-    // Clean up current connection
     connectedDevice = null;
     writeCharacteristic = null;
     lastSentMessage = null;
     _heartbeatTimer?.cancel();
-
     update();
-
-    // Show notification
     CustomSnackBars.instance.showFailureSnackbar(
       title: 'Connection Lost',
       message: reason,
@@ -275,15 +270,12 @@ class BluetoothController extends GetxController {
         title: 'Error',
         message: 'Failed to send data: ${e.toString()}',
       );
-
-      // If send failed, might indicate connection issue
       if (e.toString().contains('disconnected') ||
           e.toString().contains('not connected')) {
         _handleConnectionLoss('Send data failed - connection lost');
       }
     }
   }
-
   Future<String?> readDataFromSpecificCharacteristic() async {
     if (connectedDevice == null) {
       throw Exception('No device connected');
@@ -317,7 +309,6 @@ class BluetoothController extends GetxController {
     if (connectedDevice == null) {
       throw Exception('No device connected');
     }
-
     try {
       List<BluetoothService> services = await connectedDevice!
           .discoverServices();
@@ -337,8 +328,6 @@ class BluetoothController extends GetxController {
       throw e;
     }
   }
-
-  // Control methods for auto-reconnection
   void enableAutoReconnect() {
     _autoReconnectEnabled = true;
     _reconnectionAttempts = 0;
@@ -350,8 +339,6 @@ class BluetoothController extends GetxController {
   }
 
   bool get isAutoReconnectEnabled => _autoReconnectEnabled;
-
-  // Manual reconnection trigger
   Future<void> manualReconnect() async {
     if (connectedDevice == null) {
       _reconnectionAttempts = 0;
@@ -369,27 +356,20 @@ class BluetoothController extends GetxController {
         barrierDismissible: false,
       );
 
-      // Disconnect if already connected to avoid conflicts
       if (device.isConnected) {
         await device.disconnect();
         await Future.delayed(Duration(milliseconds: 500));
       }
-
-      // Connect with extended timeout and autoConnect
       await device.connect(timeout: const Duration(seconds: 20));
-
-      // Wait for connection to stabilize
+      // waiting for stable connection
       await Future.delayed(Duration(milliseconds: 1000));
 
-      // Request high connection priority
       await device.requestConnectionPriority(
         connectionPriorityRequest: ConnectionPriority.high,
       );
-
-      // Wait after priority change
+      // waiting for change in priority to change
       await Future.delayed(Duration(milliseconds: 500));
 
-      // Discover services and find writable characteristics
       await _discoverAndSetupCharacteristics(device);
 
       connectedDevice = device;
@@ -424,38 +404,25 @@ class BluetoothController extends GetxController {
       throw e;
     }
   }
-
   Future<void> _discoverAndSetupCharacteristics(BluetoothDevice device) async {
     try {
       // Discover services with retry mechanism
       List<BluetoothService> services = await _discoverServicesWithRetry(
         device,
       );
-
-      // Clear previous characteristics
       writableCharacteristics.clear();
       writeCharacteristic = null;
-      // readCharacteristic = null;
-
-      // Log all services
       for (int i = 0; i < services.length; i++) {
         log('Service $i: ${services[i].toString()}');
       }
-
-      // Find all writable and readable characteristics
       await _findAllCharacteristics(services);
-
-      // Verify we found writable characteristics
       if (writableCharacteristics.isEmpty) {
         throw Exception('No writable characteristics found on device');
       }
-
-      // Set primary write characteristic (prefer FFE1 if available)
       _setPrimaryWriteCharacteristic();
 
       log('Found ${writableCharacteristics.length} writable characteristics');
       log('Primary write characteristic: ${writeCharacteristic?.uuid}');
-      // log('Read characteristic: ${readCharacteristic?.uuid}');
     } catch (e) {
       debugPrint('Error discovering characteristics: $e');
       throw e;
@@ -505,7 +472,7 @@ class BluetoothController extends GetxController {
             'Found writable characteristic: ${characteristic.uuid} in service: ${service.uuid}',
           );
 
-          // Set as primary write if it's FFE1 (common UART service)
+          // Set as primary write if it's FFE1 
           if (characteristic.uuid.toString().toUpperCase().contains("FFE1")) {
             writeCharacteristic = characteristic;
             log('Set FFE1 as primary write characteristic');
@@ -521,7 +488,6 @@ class BluetoothController extends GetxController {
             readCharacteristic = characteristic;
             log('Set read characteristic: ${characteristic.uuid}');
 
-            // Enable notifications if supported
             if (characteristic.properties.notify ||
                 characteristic.properties.indicate) {
               try {
@@ -564,8 +530,6 @@ class BluetoothController extends GetxController {
           .join(' ');
       log('Received hex: $hex');
     }
-
-    // Notify UI about received data
     update();
   }
 
@@ -574,7 +538,7 @@ class BluetoothController extends GetxController {
     if (writeCharacteristic != null) {
       try {
         await Future.delayed(Duration(milliseconds: 500));
-        await sendData("hello");
+        await sendHexData();
         log('Initial test data sent successfully');
       } catch (e) {
         debugPrint('Initial test data send failed: $e');
